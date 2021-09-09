@@ -1,0 +1,71 @@
+description: librispeech_espnet_train_base
+target:
+  service: amlk8s
+  name: a100-scus
+  # name: itp-v100-scus
+  # name: itp-v100-wus2
+  # name: v100-32gb-wus2-2
+  vc: csr-itp-speech
+  # vc: csr-itp-nlk
+  # queue: bonus
+environment:
+  image: espnet/espnet:gpu-latest
+  registry: docker.io
+  setup:
+  - apt-get install sudo
+  - cd tools/; make
+  - export PYTHONPATH=`pwd`:$$PYTHONPATH
+code:
+  local_dir: $CONFIG_DIR/..
+storage:
+  blob_user:
+      # storage_account_name: tsstd01wus2
+    storage_account_name: tsstd01scus
+    container_name: users
+    mount_dir: /blob/tsst/users
+    mount_options:
+    - -o
+    - attr_timeout=240
+    - -o
+    - entry_timeout=240
+    - -o
+    - negative_timeout=120
+    - -o
+    - allow_other
+    - --log-level=LOG_WARNING
+    - --file-cache-timeout-in-seconds=0
+    #   myblob_user:
+    #     storage_account_name: tsstd01scus
+    #     container_name: users
+    #     mount_dir: /blob/tsst/users
+jobs: #one node
+- aml_mpirun:
+    communicator: OpenMpi
+    process_count_per_node: 1
+  command:
+  - python -V
+  - cd ./egs2/librispeech/asr1; bash run/run.itp.no_ctc.single.sh --stage 11 --stop-stage 11
+    # - cd ./egs2/librispeech/asr1; bash run/run.itp.sh --stage 10 --stop-stage 10 --nj 8
+    # - sleep infinity
+  name: espnet_train_librispeech_base
+  sku: G8
+  sku_count: 1
+
+# jobs: #for two node
+# - aml_mpirun:
+#     communicator: OpenMpi
+#     process_count_per_node: 8
+#   command:
+#   - fairseq-hydra-train checkpoint.save_dir=/modelblob/hmwang/models/ common.tensorboard_logdir=/modelblob/hmwang/models/
+#     distributed_training.distributed_world_size=32  --config-dir ./examples/wav2vec/config/pretraining
+#     --config-name hubert_base_librispeech
+#   name: speech-job-hubert_base_librispeech
+#   sku: G8
+#   sku_count: 4
+#   submit_args:
+#     constraints:
+#     - tag: connectivityDomain
+#       type: uniqueConstraint
+#     container_args:
+#       shm_size: 256G
+#       shm_size_per_gpu: 5000000000

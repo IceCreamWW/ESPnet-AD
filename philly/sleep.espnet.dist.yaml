@@ -1,0 +1,61 @@
+description: debug_dist
+target:
+  service: amlk8s
+  # name: a100-scus
+  # name: itp-v100-scus
+  name: itp-v100-wus2
+  vc: csr-itp-speech
+environment:
+  image: espnet/espnet:gpu-latest
+  registry: docker.io
+  setup:
+  - apt-get install sudo
+code:
+  local_dir: $CONFIG_DIR/..
+storage:
+  blob_user:
+    storage_account_name: tsstd01wus2
+    container_name: users
+    mount_dir: /blob
+    mount_options:
+    - -o
+    - attr_timeout=240
+    - -o
+    - entry_timeout=240
+    - -o
+    - negative_timeout=120
+    - -o
+    - allow_other
+    - --log-level=LOG_WARNING
+    - --file-cache-timeout-in-seconds=0
+    # mount_dir: /blob/tsst/users
+    #   myblob_user:
+    #     storage_account_name: tsstd01scus
+    #     container_name: users
+    #     mount_dir: /blob/tsst/users
+jobs: #one node
+- command:
+  - python -V
+  - sleep infinity
+  name: espnet_debug_sleep
+  sku: G8
+  sku_count: 2
+
+# jobs: #for two node
+# - aml_mpirun:
+#     communicator: OpenMpi
+#     process_count_per_node: 8
+#   command:
+#   - fairseq-hydra-train checkpoint.save_dir=/modelblob/hmwang/models/ common.tensorboard_logdir=/modelblob/hmwang/models/
+#     distributed_training.distributed_world_size=32  --config-dir ./examples/wav2vec/config/pretraining
+#     --config-name hubert_base_librispeech
+#   name: speech-job-hubert_base_librispeech
+#   sku: G8
+#   sku_count: 4
+#   submit_args:
+#     constraints:
+#     - tag: connectivityDomain
+#       type: uniqueConstraint
+#     container_args:
+#       shm_size: 256G
+#       shm_size_per_gpu: 5000000000

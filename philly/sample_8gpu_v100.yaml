@@ -1,0 +1,81 @@
+code:
+  local_dir: $CONFIG_DIR/fairseq
+description: hubert_pretrain_test_main32
+environment:
+  image: speech_transducers:fairseq
+  registry: sramdevregistry.azurecr.io
+  setup:
+  - pip install portalocker==2.0.0
+  - pip install numpy==1.21.0
+  - apt-get install sudo
+  - echo "pip install --prefix $$PYTHONUSERBASE --editable ./"
+  - pip install --prefix $$PYTHONUSERBASE --editable ./
+  - echo "pip install  ./ --user"
+  - pip install  ./ --user
+  - python setup.py build_ext --inplace
+  - export PYTHONPATH=./
+  - cp .bashrc ~/ && cp .vimrc ~/
+  username: sramdevregistry
+
+storage:
+  myblob_user:
+    storage_account_name: sdrgprmblob01scus
+    container_name: user
+    mount_dir: /blob/sdrg/user
+  myblob_private:
+    storage_account_name: sdrgprmblob01scus
+    container_name: private
+    mount_dir: /blob/sdrg/private
+  myblob_public:
+    storage_account_name: sdrgprmblob01scus
+    container_name: public
+    mount_dir: /blob/sdrg/public
+  myblob_data:
+    storage_account_name: sdrgprmblob01scus
+    container_name: data
+    mount_dir: /blob/sdrg/data
+target:
+#  name: a100-scus
+  name: itp-v100-scus
+  service: amlk8s
+  vc: csr-itp-speech
+  # queue: bonus
+
+jobs: #one node
+- command:
+  - python -V
+  - python run_pretrain.py --config_dir ./configs --config_name hubert_test
+  - python -V
+  - fairseq-hydra-train distributed_training.distributed_world_size=8  --config-dir ./configs --config-name hubert_test
+  name: hubert_pretrain_test
+  sku: G8
+  sku_count: 1
+  submit_args:
+    constraints:
+    - tag: connectivityDomain
+      type: uniqueConstraint
+    container_args:
+      shm_size: 256G
+      shm_size_per_gpu: 5000000000
+    env:
+      MKL_THREADING_LAYER: GNU
+      NCCL_IB_DISABLE: 1
+
+# jobs: #for two node
+# - aml_mpirun:
+#     communicator: OpenMpi
+#     process_count_per_node: 8
+#   command:
+#   - fairseq-hydra-train checkpoint.save_dir=/modelblob/hmwang/models/ common.tensorboard_logdir=/modelblob/hmwang/models/
+#     distributed_training.distributed_world_size=32  --config-dir ./examples/wav2vec/config/pretraining
+#     --config-name hubert_base_librispeech
+#   name: speech-job-hubert_base_librispeech
+#   sku: G8
+#   sku_count: 4
+#   submit_args:
+#     constraints:
+#     - tag: connectivityDomain
+#       type: uniqueConstraint
+#     container_args:
+#       shm_size: 256G
+#       shm_size_per_gpu: 5000000000
