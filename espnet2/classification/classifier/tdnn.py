@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from espnet2.classification.classifier import AbsClassifier
+from espnet2.classification.classifier.abs_classifier import AbsClassifier
 from espnet2.classification.layers.pooling import AttentiveStatisticsPooling, StatisticsPooling
 
-class TNDD(AbsClassifier):
+class TDNN(AbsClassifier):
     """
     The extended TDNN xvec described in
     SPEAKER RECOGNITION FOR MULTI-SPEAKER CONVERSATIONS USING X-VECTORS
@@ -13,9 +13,9 @@ class TNDD(AbsClassifier):
     State-of-the-art speaker recognition with neural network embeddings in NIST SRE18 and Speakers in the Wild evaluations
     Which is just a deeper xvec architecture
     """
-    def __init__(self, feat_dim=40, hid_dim=512, stats_dim=1500, emb_dim=512, num_class=2,
+    def __init__(self, feat_dim=40, hid_dim=512, stats_dim=1500, emb_dim=512, num_classes=2,
                  pooling='statistic', stddev=True, affine_layers=2, norm_way='softmax'):
-        super(EXT_XVEC, self).__init__()
+        super(TDNN, self).__init__()
         self.frame_1 = TDNN_Layer(feat_dim, hid_dim, context_size=5, dilation=1)
         self.frame_1a = TDNN_Layer(hid_dim, hid_dim, context_size=1, dilation=1)
         self.frame_2 = TDNN_Layer(hid_dim, hid_dim, context_size=3, dilation=2)
@@ -34,7 +34,7 @@ class TNDD(AbsClassifier):
         self.seg_1 = nn.Linear(stats_dim * 2, emb_dim)
         self.seg_bn_1 = nn.BatchNorm1d(emb_dim, affine=False)
         self.seg_2 = nn.Linear(emb_dim, emb_dim)
-        self.linear = nn.Linear(embed_dim, output_dim)
+        self.linear = nn.Linear(emb_dim, num_classes)
 
     def forward(self, x, x_lens):
         out, out_lens = self.frame_1(x, x_lens)

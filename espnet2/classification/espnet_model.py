@@ -10,6 +10,7 @@ import torch
 from typeguard import check_argument_types
 
 from espnet2.classification.frontend.abs_frontend import AbsFrontend
+from espnet2.classification.classifier.abs_classifier import AbsClassifier
 from espnet2.asr.preencoder.abs_preencoder import AbsPreEncoder
 from espnet2.asr.specaug.abs_specaug import AbsSpecAug
 from espnet2.layers.abs_normalize import AbsNormalize
@@ -58,6 +59,7 @@ class ESPnetClassificationModel(AbsESPnetModel):
         speech: torch.Tensor,
         speech_lengths: torch.Tensor,
         label: torch.Tensor,
+        **kwargs
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
         """Frontend + Encoder + Decoder + Calc loss
 
@@ -87,10 +89,10 @@ class ESPnetClassificationModel(AbsESPnetModel):
 
         stats = dict(
             loss=loss.detach(),
-            precision_score = precision_score(label, pred),
-            accuracy_score = accuracy_score(label, pred),
-            recall = recall_score(label, pred),
-            f1 = f1_score(label, pred),
+            precision_score=precision_score(label, pred),
+            accuracy_score=accuracy_score(label, pred),
+            recall=recall_score(label, pred),
+            f1=f1_score(label, pred),
         )
 
         # force_gatherable: to-device and to-tensor if scalar for DataParallel
@@ -101,8 +103,8 @@ class ESPnetClassificationModel(AbsESPnetModel):
         self,
         speech: torch.Tensor,
         speech_lengths: torch.Tensor,
-        text: torch.Tensor,
-        text_lengths: torch.Tensor,
+        label: torch.Tensor,
+        **kwargs
     ) -> Dict[str, torch.Tensor]:
         feats, feats_lengths = self._extract_feats(speech, speech_lengths)
         return {"feats": feats, "feats_lengths": feats_lengths}

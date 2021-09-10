@@ -28,6 +28,7 @@ stop_stage=10000     # Processes is stopped at the specified stage.
 skip_data_prep=false # Skip data preparation stages.
 skip_train=false     # Skip training stages.
 skip_eval=false      # Skip decoding and evaluation stages.
+skip_upload=true     # Skip packing and uploading stages.
 ngpu=8               # The number of gpus ("0" uses cpu, otherwise use gpu).
 nj=8                # The number of parallel jobs.
 inference_nj=32      # The number of parallel jobs in decoding.
@@ -47,7 +48,7 @@ speed_perturb_factors=  # perturbation factors, e.g. "0.9 1.0 1.1" (separated by
 
 # Feature extraction related
 feats_type=raw       # Feature type (raw or fbank_pitch).
-audio_format=wav    # Audio format: wav, flac, wav.ark, flac.ark  (only in feats_type=raw).
+audio_format=flac    # Audio format: wav, flac, wav.ark, flac.ark  (only in feats_type=raw).
 fs=16k               # Sampling rate.
 min_wav_duration=0.1 # Minimum duration in second.
 max_wav_duration=20  # Maximum duration in second.
@@ -76,6 +77,7 @@ inference_classification_model=valid.acc.ave.pth # Classification model path for
                                       # inference_classification_model=3epoch.pth
                                       # inference_classification_model=valid.acc.best.pth
                                       # inference_classification_model=valid.loss.ave.pth
+download_model= # Download a model from Model Zoo and use it for decoding.
 
 # [Task dependent] Set the datadir name created by local/data.sh
 train_set=       # Name of training set.
@@ -85,6 +87,7 @@ score_opts=                # The options given to sclite scoring
 local_score_opts=          # The options given to local/score.sh.
 classification_speech_fold_length=800 # fold_length for speech data during ASR training.
 classification_text_fold_length=150   # fold_length for text data during ASR training.
+lm_fold_length=150         # fold_length for LM training.
 
 help_message=$(cat << EOF
 Usage: $0 --train-set "<train_set_name>" --valid-set "<valid_set_name>" --test_sets "<test_set_names>"
@@ -96,6 +99,7 @@ Options:
     --skip_data_prep # Skip data preparation stages (default="${skip_data_prep}").
     --skip_train     # Skip training stages (default="${skip_train}").
     --skip_eval      # Skip decoding and evaluation stages (default="${skip_eval}").
+    --skip_upload    # Skip packing and uploading stages (default="${skip_upload}").
     --ngpu           # The number of gpus ("0" uses cpu, otherwise use gpu, default="${ngpu}").
     --nj             # The number of parallel jobs (default="${nj}").
     --inference_nj   # The number of parallel jobs in decoding (default="${inference_nj}").
@@ -134,7 +138,9 @@ Options:
     --inference_args      # Arguments for decoding (default="${inference_args}").
                           # e.g., --inference_args "--lm_weight 0.1"
                           # Note that it will overwrite args in inference config.
+    --inference_lm        # Language modle path for decoding (default="${inference_lm}").
     --inference_classification_model # ASR model path for decoding (default="${inference_classification_model}").
+    --download_model      # Download a model from Model Zoo and use it for decoding (default="${download_model}").
 
     # [Task dependent] Set the datadir name created by local/data.sh
     --train_set     # Name of training set (required).
@@ -145,6 +151,7 @@ Options:
     --local_score_opts       # The options given to local/score.sh (default="{local_score_opts}").
     --classification_speech_fold_length # fold_length for speech data during ASR training (default="${classification_speech_fold_length}").
     --classification_text_fold_length   # fold_length for text data during ASR training (default="${classification_text_fold_length}").
+    --lm_fold_length         # fold_length for LM training (default="${lm_fold_length}").
 EOF
 )
 
@@ -197,6 +204,14 @@ if [ -z "${classification_tag}" ]; then
     else
         classification_tag="train_${feats_type}"
     fi
+    if [ "${lang}" != noinfo ]; then
+        classification_tag+="_${lang}_${token_type}"
+    else
+        classification_tag+="_${token_type}"
+    fi
+    if [ "${token_type}" = bpe ]; then
+        classification_tag+="${nbpe}"
+    fi
     # Add overwritten arg's info
     if [ -n "${classification_args}" ]; then
         classification_tag+="$(echo "${classification_args}" | sed -e "s/--/\_/g" -e "s/[ |=/]//g")"
@@ -212,7 +227,7 @@ if [ -z "${classification_stats_dir}" ]; then
     if [ ! -z "${classification_stats_tag}" ]; then
         classification_stats_dir="${expdir}/classification_stats_${classification_stats_tag}"
     else
-        classification_stats_dir="${expdir}/classification_stats_${feats_type}"
+        classification_stats_dir="${expdir}/classification_stats_${feats_type}_${token_type}"
         if [ -n "${speed_perturb_factors}" ]; then
             classification_stats_dir+="_sp"
         fi
@@ -223,6 +238,13 @@ fi
 if [ -z "${classification_exp}" ]; then
     classification_exp="${expdir}/classification_${classification_tag}"
 fi
+if [ -z "${lm_exp}" ]; then
+    lm_exp="${expdir}/lm_${lm_tag}"
+fi
+if [ -z "${ngram_exp}" ]; then
+    ngram_exp="${expdir}/ngram"
+fi
+
 
 if [ -z "${inference_tag}" ]; then
     if [ -n "${inference_config}" ]; then
@@ -233,6 +255,12 @@ if [ -z "${inference_tag}" ]; then
     # Add overwritten arg's info
     if [ -n "${inference_args}" ]; then
         inference_tag+="$(echo "${inference_args}" | sed -e "s/--/\_/g" -e "s/[ |=]//g")"
+    fi
+    if "${use_lm}"; then
+        inference_tag+="_lm_$(basename "${lm_exp}")_$(echo "${inference_lm}" | sed -e "s/\//_/g" -e "s/\.[^.]*$//g")"
+    fi
+    if "${use_ngram}"; then
+        inference_tag+="_ngram_$(basename "${ngram_exp}")_$(echo "${inference_ngram}" | sed -e "s/\//_/g" -e "s/\.[^.]*$//g")"
     fi
     inference_tag+="_classification_model_$(echo "${inference_classification_model}" | sed -e "s/\//_/g" -e "s/\.[^.]*$//g")"
 
@@ -290,9 +318,7 @@ if ! "${skip_data_prep}"; then
                 else
                     _suf=""
                 fi
-                utils/copy_data_dir.sh --validate_opts "--no-text" ${datadir}/"${dset}" "${data_feats}${_suf}/${dset}"
-                # mkdir -p "${data_feats}${_suf}/${dset}"
-                # cp -r "${datadir}/${dset}" "${data_feats}${_suf}/${dset}"
+                utils/copy_data_dir.sh --validate_opts --non-print ${datadir}/"${dset}" "${data_feats}${_suf}/${dset}"
                 rm -f ${data_feats}${_suf}/${dset}/{segments,wav.scp,reco2file_and_channel,reco2dur}
                 _opts=
                 if [ -e ${datadir}/"${dset}"/segments ]; then
@@ -384,7 +410,7 @@ if ! "${skip_data_prep}"; then
         for dset in "${train_set}" "${valid_set}"; do
 
             # Copy data dir
-            utils/copy_data_dir.sh --validate_opts "--no-text" "${data_feats}/org/${dset}" "${data_feats}/${dset}"
+            utils/copy_data_dir.sh --validate_opts --non-print "${data_feats}/org/${dset}" "${data_feats}/${dset}"
             cp "${data_feats}/org/${dset}/feats_type" "${data_feats}/${dset}/feats_type"
 
             # Remove short utterances
@@ -428,6 +454,10 @@ if ! "${skip_data_prep}"; then
                     >"${data_feats}/${dset}/feats.scp"
             fi
 
+            # Remove empty text
+            <"${data_feats}/org/${dset}/text" \
+                awk ' { if( NF != 1 ) print $0; } ' >"${data_feats}/${dset}/text"
+
             # fix_data_dir.sh leaves only utts which exist in all files
             utils/fix_data_dir.sh "${data_feats}/${dset}"
         done
@@ -443,7 +473,7 @@ fi
 
 
 if ! "${skip_train}"; then
-    if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
+    if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 10 ]; then
         _classification_train_dir="${data_feats}/${train_set}"
         _classification_valid_dir="${data_feats}/${valid_set}"
         log "Stage 5: Classification collect stats: train_set=${_classification_train_dir}, valid_set=${_classification_valid_dir}"
@@ -464,6 +494,7 @@ if ! "${skip_train}"; then
                 # "sound" supports "wav", "flac", etc.
                 _type=sound
             fi
+            _opts+="--frontend_conf fs=${fs} "
         else
             _scp=feats.scp
             _type=kaldi_ark
@@ -505,27 +536,16 @@ if ! "${skip_train}"; then
         #       but it's used only for deciding the sample ids.
 
         # shellcheck disable=SC2086
-#         ${train_cmd} JOB=1:"${_nj}" "${_logdir}"/stats.JOB.log \
-#             ${python} -m espnet2.bin.classification_train \
-#                 --collect_stats true \
-#                 --train_data_path_and_name_and_type "${_classification_train_dir}/${_scp},speech,${_type}" \
-#                 --train_data_path_and_name_and_type "${_classification_train_dir}/utt2cat,label,text_int" \
-#                 --valid_data_path_and_name_and_type "${_classification_valid_dir}/${_scp},speech,${_type}" \
-#                 --valid_data_path_and_name_and_type "${_classification_valid_dir}/utt2cat,label,text_int" \
-#                 --train_shape_file "${_logdir}/train.JOB.scp" \
-#                 --valid_shape_file "${_logdir}/valid.JOB.scp" \
-#                 --output_dir "${_logdir}/stats.JOB" \
-#                 ${_opts} ${classification_args} || { cat "${_logdir}"/stats.1.log; exit 1; }
-
+        ${train_cmd} JOB=1:"${_nj}" "${_logdir}"/stats.JOB.log \
             ${python} -m espnet2.bin.classification_train \
                 --collect_stats true \
                 --train_data_path_and_name_and_type "${_classification_train_dir}/${_scp},speech,${_type}" \
                 --train_data_path_and_name_and_type "${_classification_train_dir}/utt2cat,label,text_int" \
                 --valid_data_path_and_name_and_type "${_classification_valid_dir}/${_scp},speech,${_type}" \
                 --valid_data_path_and_name_and_type "${_classification_valid_dir}/utt2cat,label,text_int" \
-                --train_shape_file "${_logdir}/train.1.scp" \
-                --valid_shape_file "${_logdir}/valid.1.scp" \
-                --output_dir "${_logdir}/stats.1" \
+                --train_shape_file "${_logdir}/train.JOB.scp" \
+                --valid_shape_file "${_logdir}/valid.JOB.scp" \
+                --output_dir "${_logdir}/stats.JOB" \
                 ${_opts} ${classification_args} || { cat "${_logdir}"/stats.1.log; exit 1; }
 
         # 4. Aggregate shape files
@@ -540,10 +560,10 @@ if ! "${skip_train}"; then
     fi
 
 
-    if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
+    if [ ${stage} -le 11 ] && [ ${stop_stage} -ge 11 ]; then
         _classification_train_dir="${data_feats}/${train_set}"
         _classification_valid_dir="${data_feats}/${valid_set}"
-        log "Stage 6: Classification Training: train_set=${_classification_train_dir}, valid_set=${_classification_valid_dir}"
+        log "Stage 11: ASR Training: train_set=${_classification_train_dir}, valid_set=${_classification_valid_dir}"
 
         _opts=
         if [ -n "${classification_config}" ]; then
@@ -562,6 +582,7 @@ if ! "${skip_train}"; then
                 _type=sound
             fi
             _fold_length="$((classification_speech_fold_length * 100))"
+            _opts+="--frontend_conf fs=${fs} "
         else
             _scp=feats.scp
             _type=kaldi_ark
@@ -648,6 +669,38 @@ if ! "${skip_train}"; then
     fi
 else
     log "Skip the training stages"
+fi
+
+
+if [ -n "${download_model}" ]; then
+    log "Use ${download_model} for decoding and evaluation"
+    classification_exp="${expdir}/${download_model}"
+    mkdir -p "${classification_exp}"
+
+    # If the model already exists, you can skip downloading
+    espnet_model_zoo_download --unpack true "${download_model}" > "${classification_exp}/config.txt"
+
+    # Get the path of each file
+    _classification_model_file=$(<"${classification_exp}/config.txt" sed -e "s/.*'classification_model_file': '\([^']*\)'.*$/\1/")
+    _classification_train_config=$(<"${classification_exp}/config.txt" sed -e "s/.*'classification_train_config': '\([^']*\)'.*$/\1/")
+
+    # Create symbolic links
+    ln -sf "${_classification_model_file}" "${classification_exp}"
+    ln -sf "${_classification_train_config}" "${classification_exp}"
+    inference_classification_model=$(basename "${_classification_model_file}")
+
+    if [ "$(<${classification_exp}/config.txt grep -c lm_file)" -gt 0 ]; then
+        _lm_file=$(<"${classification_exp}/config.txt" sed -e "s/.*'lm_file': '\([^']*\)'.*$/\1/")
+        _lm_train_config=$(<"${classification_exp}/config.txt" sed -e "s/.*'lm_train_config': '\([^']*\)'.*$/\1/")
+
+        lm_exp="${expdir}/${download_model}/lm"
+        mkdir -p "${lm_exp}"
+
+        ln -sf "${_lm_file}" "${lm_exp}"
+        ln -sf "${_lm_train_config}" "${lm_exp}"
+        inference_lm=$(basename "${_lm_file}")
+    fi
+
 fi
 
 

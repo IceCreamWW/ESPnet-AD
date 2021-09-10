@@ -1,0 +1,45 @@
+batch_type: numel
+# batch_bins: 16000000
+batch_bins: 1600000
+accum_grad: 4
+max_epoch: 200
+patience: 10
+best_model_criterion:
+-   - valid
+    - f1
+    - max
+keep_nbest_models: 10
+
+classifier: tdnn
+classifier_conf:
+    num_classes: 3
+    feat_dim: 768
+frontend: s3prl
+frontend_conf:
+    download_dir: /blob/tsst/users/v-weiwang1/pretrained/
+    feat_type: hubert_large_ll60k
+    feature_selection: hidden_states
+optim: adam
+optim_conf:
+    lr: 0.001
+scheduler: reducelronplateau
+scheduler_conf:
+    mode: min
+    factor: 0.5
+    patience: 4
+
+specaug: specaug
+specaug_conf:
+    apply_time_warp: true
+    time_warp_window: 5
+    time_warp_mode: bicubic
+    apply_freq_mask: true
+    freq_mask_width_range:
+    - 0
+    - 30
+    num_freq_mask: 2
+    apply_time_mask: true
+    time_mask_width_range:
+    - 0
+    - 40
+    num_time_mask: 2

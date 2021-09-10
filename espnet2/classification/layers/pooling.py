@@ -35,7 +35,7 @@ class StatisticsPooling(torch.nn.Module):
                 std[i] = torch.sqrt(torch.var(x[i][:,:x_lens[i]], dim=-1) + 1e-10)
         if self.stddev:
             return torch.cat((mean, std), dim=1)
-        else
+        else:
             return mean
             # std = torch.sqrt(torch.var(x, dim=-1) + 1e-10)
 

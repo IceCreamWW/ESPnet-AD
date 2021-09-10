@@ -101,14 +101,7 @@ class ClassificationTask(AbsTask):
         # NOTE(kamo): add_arguments(..., required=True) can't be used
         # to provide --print_config mode. Instead of it, do as
         required = parser.get_default("required")
-        required += ["token_list"]
 
-        group.add_argument(
-            "--token_list",
-            type=str_or_none,
-            default=None,
-            help="A text mapping int-id to token",
-        )
         group.add_argument(
             "--init",
             type=lambda x: str_or_none(x.lower()),
@@ -134,7 +127,7 @@ class ClassificationTask(AbsTask):
         group.add_argument(
             "--model_conf",
             action=NestedDictAction,
-            default=get_default_kwargs(ESPnetASRModel),
+            default=get_default_kwargs(ESPnetClassificationModel),
             help="The keyword arguments for model class.",
         )
 
@@ -191,7 +184,7 @@ class ClassificationTask(AbsTask):
         return retval
 
     @classmethod
-    def build_model(cls, args: argparse.Namespace) -> ESPnetASRModel:
+    def build_model(cls, args: argparse.Namespace) -> ESPnetClassificationModel:
         assert check_argument_types()
 
         # 1. frontend
@@ -223,7 +216,7 @@ class ClassificationTask(AbsTask):
 
         # 4. Classifier
         classifier_class = classifier_choices.get_class(args.classifier)
-        classifier = classifer_class(**args.classifier_conf)
+        classifier = classifier_class(**args.classifier_conf)
 
         # 8. Build model
         model = ESPnetClassificationModel(
